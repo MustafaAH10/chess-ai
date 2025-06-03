@@ -8,6 +8,7 @@ import threading
 import time
 from datetime import datetime
 import re
+import os
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'chess-game-secret'
@@ -18,7 +19,8 @@ MODELS = [
     "deepseek-r1:7b",
     "gemma3:4b",
     "llama3.2:3b",
-    "mistral:7b"
+    "mistral:7b",
+    "llava"
 ]
 
 OLLAMA_URL = "http://localhost:11434"
@@ -118,6 +120,14 @@ class OllamaManager:
         self.current_model = None
         self.model_lock = threading.Lock()
         self.load_timeout = 30  # 30 seconds timeout for model loading
+        self.multimodal_timeout = 600  # 10 minutes timeout for multimodal models
+        self.standard_timeout = 120  # 2 minutes timeout for standard models
+        self.save_images = True  # Flag to control image saving
+        self.image_dir = "board_images"  # Directory to save images
+        
+        # Create image directory if it doesn't exist
+        if self.save_images:
+            os.makedirs(self.image_dir, exist_ok=True)
         
         # Model configurations
         self.model_configs = {
@@ -126,8 +136,9 @@ class OllamaManager:
                 "top_p": 0.9,
                 "supports_cot": True,
                 "supports_tools": True,
-                "max_tokens": 2048,
-                "context_window": 4096
+                "max_tokens": 512,
+                "context_window": 4096,
+                "supports_multimodal": False
             },
             "gemma3:4b": {
                 "temperature": 0.5,
@@ -135,7 +146,8 @@ class OllamaManager:
                 "supports_cot": False,
                 "supports_tools": False,
                 "max_tokens": 1024,
-                "context_window": 2048
+                "context_window": 2048,
+                "supports_multimodal": True
             },
             "llama3.2:3b": {
                 "temperature": 0.7,
@@ -143,7 +155,8 @@ class OllamaManager:
                 "supports_cot": False,
                 "supports_tools": True,
                 "max_tokens": 1024,
-                "context_window": 2048
+                "context_window": 2048,
+                "supports_multimodal": False
             },
             "mistral:7b": {
                 "temperature": 0.7,
@@ -151,7 +164,17 @@ class OllamaManager:
                 "supports_cot": True,
                 "supports_tools": True,
                 "max_tokens": 2048,
-                "context_window": 4096
+                "context_window": 4096,
+                "supports_multimodal": False
+            },
+            "llava": {
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "supports_cot": True,
+                "supports_tools": False,
+                "max_tokens": 2048,
+                "context_window": 4096,
+                "supports_multimodal": True
             }
         }
     
@@ -216,6 +239,70 @@ class OllamaManager:
                     return False
             return True
     
+    def generate_board_image(self, board):
+        """Generate a base64 encoded image of the chess board with piece letters and square notation."""
+        import base64
+        from PIL import Image, ImageDraw, ImageFont
+        import io
+        import time
+        
+        # Create a 400x400 image with a light background
+        img = Image.new('RGB', (400, 400), '#f0d9b5')
+        draw = ImageDraw.Draw(img)
+        
+        # Try to load a default font
+        try:
+            font = ImageFont.truetype("DejaVuSans.ttf", 28)
+            small_font = ImageFont.truetype("DejaVuSans.ttf", 12)
+        except:
+            font = None
+            small_font = None
+        
+        square_size = 50
+        files = 'abcdefgh'
+        ranks = '87654321'
+        for rank_idx, rank in enumerate(ranks):
+            for file_idx, file in enumerate(files):
+                x1 = file_idx * square_size
+                y1 = rank_idx * square_size
+                x2 = x1 + square_size
+                y2 = y1 + square_size
+                # Alternate colors
+                if (rank_idx + file_idx) % 2 == 1:
+                    draw.rectangle([x1, y1, x2, y2], fill='#b58863')
+                # Draw algebraic notation in bottom left
+                notation = f"{file}{rank}"
+                draw.text((x1 + 2, y2 - 14), notation, fill="#888", font=small_font)
+        
+        # Draw pieces as letters
+        for square in chess.SQUARES:
+            piece = board.piece_at(square)
+            if piece:
+                file_idx = chess.square_file(square)
+                rank_idx = 7 - chess.square_rank(square)  # Flip rank for display
+                x = file_idx * square_size + square_size // 2
+                y = rank_idx * square_size + square_size // 2 - 8
+                letter = piece.symbol()
+                if piece.color:
+                    # White piece: uppercase, white color
+                    draw.text((x-10, y), letter.upper(), fill='white', font=font)
+                else:
+                    # Black piece: lowercase, black color
+                    draw.text((x-10, y), letter.lower(), fill='black', font=font)
+        
+        # Save image if enabled
+        if self.save_images:
+            timestamp = int(time.time())
+            filename = f"{self.image_dir}/board_{timestamp}.png"
+            img.save(filename)
+            print(f"Saved board image to {filename}")
+        
+        # Convert to base64
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+        return img_str
+
     def get_move(self, model_name, fen, game_history="", move_number=None, color=None):
         """Get move from model."""
         print(f"[get_move] Called for model: {model_name}, FEN: {fen}")
@@ -233,6 +320,17 @@ class OllamaManager:
         config = self.get_model_config(model_name)
         board_vis = self.generate_board_visualization(board)
         
+        # Generate board image if model supports multimodal
+        board_image = None
+        piece_legend = "Piece letter legend: P/p = pawn, N/n = knight, B/b = bishop, R/r = rook, Q/q = queen, K/k = king (Uppercase = white, lowercase = black)"
+        if config.get("supports_multimodal", False):
+            board_image = self.generate_board_image(board)
+            print(f"[get_move] Generated board image for multimodal model {model_name}")
+        
+        # Set timeout based on model type
+        timeout = self.multimodal_timeout if config.get("supports_multimodal", False) else self.standard_timeout
+        print(f"[get_move] Using timeout of {timeout} seconds for model {model_name}")
+        
         # Improved FEN explanation
         fen_explanation = """
 FEN Notation Guide:
@@ -246,16 +344,48 @@ FEN Notation Guide:
         
         # Prompt improvements
         move_info = f"Move number: {move_number if move_number is not None else '?'}\nPlaying as: {color if color else '?'}\n"
+        board_image_note = "The board image uses piece letters (uppercase for white, lowercase for black) and each square is labeled with its algebraic notation in the bottom left."
         forceful = f"\n\nIMPORTANT: ONLY respond with one of the following moves: {', '.join(legal_moves)}. Do NOT invent moves. If you cannot, respond with ERROR."
         
-        base_prompt = f"""You are a chess grandmaster. Analyze this position and make the best move.
+        # Add piece legend for multimodal models
+        multimodal_legend = f"\n\n{piece_legend}" if config.get("supports_multimodal", False) else ""
+        
+        base_prompt = f"""You are a chess grandmaster. Analyze this position and make the best move.\n\n{move_info}\nCurrent position (FEN): {fen}\n{fen_explanation}\n\nBoard visualization:\n{board_vis}\n\n{board_image_note}{multimodal_legend}\n\nGame history: {game_history}\nLegal moves: {', '.join(legal_moves)}{forceful}\n\nIMPORTANT INSTRUCTIONS:\n1. You MUST choose a move from the legal moves list provided above\n2. Your response must be in this exact format:\nMOVE: [move in UCI notation]\n\nFor example:\nMOVE: e2e4\n\nIf you cannot find a valid move, respond with:\nERROR: [explanation]"""
+
+        # Add image to prompt if model supports multimodal
+        if board_image and config.get("supports_multimodal", False):
+            if model_name == "llava":
+                # For LLaVA, we need to send the image as a separate field
+                try:
+                    response = requests.post(
+                        f"{OLLAMA_URL}/api/generate",
+                        json={
+                            "model": model_name,
+                            "prompt": base_prompt,
+                            "stream": True,
+                            "images": [board_image],  # Send image as a separate field
+                            "options": {
+                                "temperature": config["temperature"],
+                                "top_p": config["top_p"],
+                                "num_predict": config["max_tokens"]
+                            }
+                        },
+                        timeout=timeout
+                    )
+                except Exception as e:
+                    print(f"[get_move] Error in get_move: {str(e)}")
+                    return None, f"Error: {str(e)}", ""
+            else:  # For other multimodal models like Gemma
+                base_prompt = f"""You are a chess grandmaster. Analyze this position and make the best move.
 
 {move_info}
 Current position (FEN): {fen}
 {fen_explanation}
 
-Board visualization:
-{board_vis}
+Here is a visual representation of the board:
+<image>
+{board_image}
+</image>
 
 Game history: {game_history}
 Legal moves: {', '.join(legal_moves)}{forceful}
@@ -270,6 +400,7 @@ MOVE: e2e4
 
 If you cannot find a valid move, respond with:
 ERROR: [explanation]"""
+
         if config["supports_cot"]:
             prompt = base_prompt + """\n<thinking>\nThink step by step:\n1. Analyze the current position:\n   - Which pieces are where?\n   - Who's turn is it?\n   - What are the key tactical and strategic elements?\n2. Review the legal moves provided\n3. Evaluate each promising candidate move:\n   - Does it develop pieces?\n   - Does it control the center?\n   - Does it create threats?\n   - Does it maintain king safety?\n4. Choose the best move based on your analysis\n5. Explain your reasoning\n</thinking>\n\nAfter your analysis, provide your move in UCI notation (e.g., e2e4, g1f3).\nFormat your final answer as: MOVE: [your move in UCI notation]"""
         else:
@@ -277,20 +408,21 @@ ERROR: [explanation]"""
 
         try:
             print(f"[get_move] Sending request to Ollama API for model {model_name}")
-            response = requests.post(
-                f"{OLLAMA_URL}/api/generate",
-                json={
-                    "model": model_name,
-                    "prompt": prompt,
-                    "stream": True,
-                    "options": {
-                        "temperature": config["temperature"],
-                        "top_p": config["top_p"],
-                        "num_predict": config["max_tokens"]
-                    }
-                },
-                timeout=120
-            )
+            if not (board_image and model_name == "llava"):  # Skip if we already sent the request for LLaVA
+                response = requests.post(
+                    f"{OLLAMA_URL}/api/generate",
+                    json={
+                        "model": model_name,
+                        "prompt": prompt,
+                        "stream": True,
+                        "options": {
+                            "temperature": config["temperature"],
+                            "top_p": config["top_p"],
+                            "num_predict": config["max_tokens"]
+                        }
+                    },
+                    timeout=timeout
+                )
             print(f"[get_move] Ollama API response status: {response.status_code}")
             if response.status_code == 200:
                 full_thinking = ""
@@ -328,6 +460,11 @@ ERROR: [explanation]"""
                 print(f"[get_move] Full thinking: {full_thinking}")
                 move = self.extract_move(full_thinking)
                 print(f"[get_move] Extracted move: {move}")
+                # Emit the full model response to the frontend
+                socketio.emit('model_response', {
+                    'model': model_name,
+                    'response': full_thinking
+                })
                 if move:
                     if move in legal_moves:
                         return move, full_thinking, chain_of_thought
@@ -369,16 +506,25 @@ ERROR: [explanation]"""
         
         return board_vis
     
-    def extract_move(self, text):
-        """Extract move from text."""
-        move_match = re.search(r'MOVE:\s*([a-h][1-8][a-h][1-8][qrbnQRBN]?)', text, re.IGNORECASE)
+    def extract_move(self, response):
+        """Extract move from model response."""
+        print(f"[extract_move] Extracting move from response: {response}")
+        # First try to find MOVE: pattern
+        move_match = re.search(r'MOVE:\s*([a-h][1-8][a-h][1-8](?:[qrbn])?)', response.lower())
         if move_match:
-            return move_match.group(1).lower()
+            move = move_match.group(1)
+            print(f"[extract_move] Found move using MOVE: pattern: {move}")
+            return move
         
-        move_match = re.search(r'\b([a-h][1-8][a-h][1-8][qrbnQRBN]?)\b', text)
+        # If no MOVE: pattern, try to find any UCI move in the response
+        uci_pattern = r'[a-h][1-8][a-h][1-8](?:[qrbn])?'
+        move_match = re.search(uci_pattern, response.lower())
         if move_match:
-            return move_match.group(1).lower()
+            move = move_match.group(0)
+            print(f"[extract_move] Found move using UCI pattern: {move}")
+            return move
         
+        print(f"[extract_move] No move found in response")
         return None
 
 # Global instances
@@ -483,4 +629,4 @@ def play_game(white_model, black_model):
 if __name__ == '__main__':
     print("Starting Chess Game Server...")
     print("Available models:", MODELS)
-    socketio.run(app, host='0.0.0.0', port=8000, debug=False)
+    socketio.run(app, host='0.0.0.0', port=8001, debug=False)
