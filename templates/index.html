@@ -320,6 +320,7 @@ const socket = io();
 let board = null;
 let game = new Chess();
 let gameInProgress = false;
+let fullModelResponses = {};
 
 // Initialize chess board and load models
 async function initializeGame() {
@@ -518,6 +519,17 @@ function updateChainOfThought(model, thinking, isStreaming) {
             </div>
         `;
     }
+    // Add full model response below analysis if available
+    if (fullModelResponses[model]) {
+        thinkingHtml += `
+            <div class="chain-of-thought" style="background:#222; margin-top:8px;">
+                <div class="cot-header"><strong>📝 Full Model Response:</strong></div>
+                <div class="cot-content" style="font-size:0.85em; color:#b0b0b0; max-height:200px; overflow-y:auto;">
+                    ${fullModelResponses[model].replace(/\n/g, '<br>')}
+                </div>
+            </div>
+        `;
+    }
     thinkingArea.innerHTML = thinkingHtml;
     statusArea.textContent = isStreaming ? '🔄 Streaming thoughts...' : '✅ Analysis complete';
     const container = document.getElementById(`${color}-thinking`);
@@ -577,6 +589,13 @@ socket.on('move_made', function(data) {
 
 socket.on('move_error', function(data) {
     addGameEvent(`${data.model} move error: ${data.error}`, 'error');
+});
+
+socket.on('model_response', function(data) {
+    // Store the full response for the model
+    fullModelResponses[data.model] = data.response;
+    // Re-render the analysis area to include the full response
+    updateChainOfThought(data.model, '', false);
 });
 
 function updateBoardFromFEN(fen) {
