@@ -129,6 +129,11 @@ class OllamaManager:
         if self.save_images:
             os.makedirs(self.image_dir, exist_ok=True)
         
+        # Initialize game log file
+        self.game_log = f"game_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        with open(self.game_log, 'w') as f:
+            f.write("=== Chess Game Log ===\n\n")
+        
         # Model configurations
         self.model_configs = {
             "deepseek-r1:7b": {
@@ -303,6 +308,40 @@ class OllamaManager:
         img_str = base64.b64encode(buffered.getvalue()).decode()
         return img_str
 
+    def log_move(self, move_number, color, model_name, prompt, response, board_image=None):
+        """Log move details to the game log file."""
+        with open(self.game_log, 'a') as f:
+            f.write(f"\n{'='*50}\n")
+            f.write(f"Move {move_number} - {color.upper()} ({model_name})\n")
+            f.write(f"{'='*50}\n\n")
+            
+            f.write("PROMPT:\n")
+            f.write("-"*20 + "\n")
+            f.write(prompt)
+            f.write("\n\n")
+            
+            f.write("RESPONSE:\n")
+            f.write("-"*20 + "\n")
+            f.write(response)
+            f.write("\n\n")
+            
+            if board_image:
+                # Save the board image
+                image_filename = f"{self.image_dir}/board_{move_number}_{color}_{model_name}.png"
+                try:
+                    import base64
+                    from PIL import Image
+                    import io
+                    # Decode base64 image and save
+                    image_data = base64.b64decode(board_image)
+                    image = Image.open(io.BytesIO(image_data))
+                    image.save(image_filename)
+                    f.write(f"Board image saved: {image_filename}\n")
+                except Exception as e:
+                    f.write(f"Error saving board image: {str(e)}\n")
+            
+            f.write("\n")
+
     def get_move(self, model_name, fen, game_history="", move_number=None, color=None):
         """Get move from model."""
         print(f"[get_move] Called for model: {model_name}, FEN: {fen}")
@@ -350,56 +389,7 @@ FEN Notation Guide:
         # Add piece legend for multimodal models
         multimodal_legend = f"\n\n{piece_legend}" if config.get("supports_multimodal", False) else ""
         
-        base_prompt = f"""You are a chess grandmaster. Analyze this position and make the best move.\n\n{move_info}\nCurrent position (FEN): {fen}\n{fen_explanation}\n\nBoard visualization:\n{board_vis}\n\n{board_image_note}{multimodal_legend}\n\nGame history: {game_history}\nLegal moves: {', '.join(legal_moves)}{forceful}\n\nIMPORTANT INSTRUCTIONS:\n1. You MUST choose a move from the legal moves list provided above\n2. Your response must be in this exact format:\nMOVE: [move in UCI notation]\n\nFor example:\nMOVE: e2e4\n\nIf you cannot find a valid move, respond with:\nERROR: [explanation]"""
-
-        # Add image to prompt if model supports multimodal
-        if board_image and config.get("supports_multimodal", False):
-            if model_name == "llava":
-                # For LLaVA, we need to send the image as a separate field
-                try:
-                    response = requests.post(
-                        f"{OLLAMA_URL}/api/generate",
-                        json={
-                            "model": model_name,
-                            "prompt": base_prompt,
-                            "stream": True,
-                            "images": [board_image],  # Send image as a separate field
-                            "options": {
-                                "temperature": config["temperature"],
-                                "top_p": config["top_p"],
-                                "num_predict": config["max_tokens"]
-                            }
-                        },
-                        timeout=timeout
-                    )
-                except Exception as e:
-                    print(f"[get_move] Error in get_move: {str(e)}")
-                    return None, f"Error: {str(e)}", ""
-            else:  # For other multimodal models like Gemma
-                base_prompt = f"""You are a chess grandmaster. Analyze this position and make the best move.
-
-{move_info}
-Current position (FEN): {fen}
-{fen_explanation}
-
-Here is a visual representation of the board:
-<image>
-{board_image}
-</image>
-
-Game history: {game_history}
-Legal moves: {', '.join(legal_moves)}{forceful}
-
-IMPORTANT INSTRUCTIONS:
-1. You MUST choose a move from the legal moves list provided above
-2. Your response must be in this exact format:
-MOVE: [move in UCI notation]
-
-For example:
-MOVE: e2e4
-
-If you cannot find a valid move, respond with:
-ERROR: [explanation]"""
+        base_prompt = f"""You are a chess grandmaster. Analyze this position and make the best move.\n\n{move_info}\nCurrent position (FEN): {fen}\n{fen_explanation}\n\nBoard visualization:\n{board_vis}\n\n{board_image_note}{multimodal_legend}\n\nGame history: {game_history}\nLegal moves: {', '.join(legal_moves)}{forceful}\n\nIMPORTANT INSTRUCTIONS:\n1. You MUST choose a move from the legal moves list provided above\n2. Your response must be in this exact format:\n<thinking>\n[Your analysis and reasoning here]\n</thinking>\n\nMOVE: [move in UCI notation]\n\nFor example:\n<thinking>\nI will develop my knight to control the center.\n</thinking>\n\nMOVE: e2e4\n\nIf you cannot find a valid move, respond with:\nERROR: [explanation]"""
 
         if config["supports_cot"]:
             prompt = base_prompt + """\n<thinking>\nThink step by step:\n1. Analyze the current position:\n   - Which pieces are where?\n   - Who's turn is it?\n   - What are the key tactical and strategic elements?\n2. Review the legal moves provided\n3. Evaluate each promising candidate move:\n   - Does it develop pieces?\n   - Does it control the center?\n   - Does it create threats?\n   - Does it maintain king safety?\n4. Choose the best move based on your analysis\n5. Explain your reasoning\n</thinking>\n\nAfter your analysis, provide your move in UCI notation (e.g., e2e4, g1f3).\nFormat your final answer as: MOVE: [your move in UCI notation]"""
@@ -408,7 +398,26 @@ ERROR: [explanation]"""
 
         try:
             print(f"[get_move] Sending request to Ollama API for model {model_name}")
-            if not (board_image and model_name == "llava"):  # Skip if we already sent the request for LLaVA
+            response = None
+            if config.get("supports_multimodal", False):
+                # For multimodal models, include the image in the request
+                response = requests.post(
+                    f"{OLLAMA_URL}/api/generate",
+                    json={
+                        "model": model_name,
+                        "prompt": prompt,
+                        "stream": True,
+                        "images": [board_image] if board_image else [],
+                        "options": {
+                            "temperature": config["temperature"],
+                            "top_p": config["top_p"],
+                            "num_predict": config["max_tokens"]
+                        }
+                    },
+                    timeout=timeout
+                )
+            else:
+                # For non-multimodal models
                 response = requests.post(
                     f"{OLLAMA_URL}/api/generate",
                     json={
@@ -423,8 +432,8 @@ ERROR: [explanation]"""
                     },
                     timeout=timeout
                 )
-            print(f"[get_move] Ollama API response status: {response.status_code}")
-            if response.status_code == 200:
+
+            if response and response.status_code == 200:
                 full_thinking = ""
                 chain_of_thought = ""
                 print(f"[get_move] Begin streaming response lines...")
@@ -460,11 +469,23 @@ ERROR: [explanation]"""
                 print(f"[get_move] Full thinking: {full_thinking}")
                 move = self.extract_move(full_thinking)
                 print(f"[get_move] Extracted move: {move}")
+                
+                # Log the move
+                self.log_move(
+                    move_number=move_number,
+                    color=color,
+                    model_name=model_name,
+                    prompt=prompt,
+                    response=full_thinking,
+                    board_image=board_image if config.get("supports_multimodal", False) else None
+                )
+                
                 # Emit the full model response to the frontend
                 socketio.emit('model_response', {
                     'model': model_name,
                     'response': full_thinking
                 })
+                
                 if move:
                     if move in legal_moves:
                         return move, full_thinking, chain_of_thought
@@ -475,11 +496,13 @@ ERROR: [explanation]"""
                     print(f"[get_move] No valid move found in response: {full_thinking}")
                     return None, "No valid move found in response", chain_of_thought
             else:
-                print(f"[get_move] API Error: {response.status_code}")
-                return None, f"API Error: {response.status_code}", ""
+                error_msg = f"API Error: {response.status_code if response else 'No response'}"
+                print(f"[get_move] {error_msg}")
+                return None, error_msg, ""
         except Exception as e:
-            print(f"[get_move] Error in get_move: {str(e)}")
-            return None, f"Error: {str(e)}", ""
+            error_msg = f"Error in get_move: {str(e)}"
+            print(f"[get_move] {error_msg}")
+            return None, error_msg, ""
     
     def generate_board_visualization(self, board):
         """Generate a visual representation of the board."""
@@ -509,6 +532,7 @@ ERROR: [explanation]"""
     def extract_move(self, response):
         """Extract move from model response."""
         print(f"[extract_move] Extracting move from response: {response}")
+        
         # First try to find MOVE: pattern
         move_match = re.search(r'MOVE:\s*([a-h][1-8][a-h][1-8](?:[qrbn])?)', response.lower())
         if move_match:
@@ -569,10 +593,12 @@ def play_game(white_model, black_model):
     white_san = None
     black_san = None
     print(f"Starting play_game: white={white_model}, black={black_model}")
+    
     while not current_game.game_over:
         current_model = white_model if current_game.current_player == "white" else black_model
         print(f"Current player: {current_game.current_player}, Model: {current_model}")
         print(f"Current FEN: {current_game.board.fen()}")
+        
         # Get move from model
         move, thinking, chain_of_thought = ollama_manager.get_move(
             current_model,
@@ -581,37 +607,45 @@ def play_game(white_model, black_model):
             move_number=move_number,
             color=current_game.current_player
         )
+        
         print(f"Model {current_model} returned move: {move}, thinking: {thinking}")
+        
         if move:
-            # Get SAN before pushing the move
-            try:
-                san = current_game.board.san(chess.Move.from_uci(move))
-            except Exception as e:
-                print(f"Error getting SAN for move {move}: {e}")
-                san = move
-            # Make the move
-            success, reason = current_game.make_move(move)
-            print(f"Tried to make move {move}: success={success}, reason={reason}")
-            if success:
-                if current_game.current_player == "black":
-                    white_san = san
+            # Validate move and get SAN
+            is_valid, san, reason = ollama_manager.validate_move(move, current_game.board)
+            
+            if is_valid:
+                # Make the move
+                success, reason = current_game.make_move(move)
+                print(f"Tried to make move {move}: success={success}, reason={reason}")
+                
+                if success:
+                    if current_game.current_player == "black":
+                        white_san = san
+                    else:
+                        black_san = san
+                        move_number += 1
+                    
+                    # Emit move made event
+                    socketio.emit('move_made', {
+                        'model': current_model,
+                        'move': move,
+                        'san': san,
+                        'move_number': move_number,
+                        'white_san': white_san,
+                        'black_san': black_san,
+                        'fen': current_game.board.fen(),
+                        'game_over': current_game.game_over,
+                        'result': "1-0" if current_game.winner == "white" else "0-1" if current_game.winner == "black" else "1/2-1/2"
+                    })
                 else:
-                    black_san = san
-                    move_number += 1
-                # Emit move made event
-                socketio.emit('move_made', {
-                    'model': current_model,
-                    'move': move,
-                    'san': san,
-                    'move_number': move_number,
-                    'white_san': white_san,
-                    'black_san': black_san,
-                    'fen': current_game.board.fen(),
-                    'game_over': current_game.game_over,
-                    'result': "1-0" if current_game.winner == "white" else "0-1" if current_game.winner == "black" else "1/2-1/2"
-                })
+                    print(f"Move error for {current_model}: {reason}")
+                    socketio.emit('move_error', {
+                        'model': current_model,
+                        'error': reason
+                    })
             else:
-                print(f"Move error for {current_model}: {reason}")
+                print(f"Invalid move {move} for {current_model}: {reason}")
                 socketio.emit('move_error', {
                     'model': current_model,
                     'error': reason
@@ -622,6 +656,7 @@ def play_game(white_model, black_model):
                 'model': current_model,
                 'error': thinking
             })
+    
     print("Game over. Unloading models.")
     # Unload both models when game is over
     ollama_manager.unload_current_model()
