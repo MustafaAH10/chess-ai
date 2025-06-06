@@ -304,12 +304,23 @@ body {
     <div class="game-info">
         <h3>📝 Move History</h3>
         <div class="moves-history" id="moves-history">
-            <p>No moves yet</p>
+            <table id="move-history-table" style="width:100%; font-family:monospace; color:#e0e0e0;">
+                <thead>
+                    <tr><th style="width:40px;">#</th><th>White</th><th>Black</th></tr>
+                </thead>
+                <tbody id="move-history-body">
+                    <tr><td colspan="3" style="text-align:center; color:#888;">No moves yet</td></tr>
+                </tbody>
+            </table>
         </div>
 
         <h3>⚠️ Game Events</h3>
         <div class="game-events" id="game-events">
             <p>No events</p>
+        </div>
+        <h3>🖥️ Model Status</h3>
+        <div class="model-status" id="model-status">
+            <p>Loading model status...</p>
         </div>
     </div>
 </div>
@@ -321,6 +332,7 @@ let board = null;
 let game = new Chess();
 let gameInProgress = false;
 let fullModelResponses = {};
+let moveHistoryArr = [];
 
 // Initialize chess board and load models
 async function initializeGame() {
@@ -538,28 +550,53 @@ function updateChainOfThought(model, thinking, isStreaming) {
     }
 }
 
-function addMove(moveNumber, whiteSan, blackSan) {
-    const movesHistory = document.getElementById('moves-history');
-    
-    if (moveNumber === 1 && whiteSan) {
-        movesHistory.innerHTML = '';
+function renderMoveHistory() {
+    const tbody = document.getElementById('move-history-body');
+    tbody.innerHTML = '';
+    if (moveHistoryArr.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:#888;">No moves yet</td></tr>';
+        return;
     }
-    
-    const moveItem = document.createElement('div');
-    moveItem.className = 'move-item';
-    
-    let moveText = `${moveNumber}. `;
-    if (whiteSan) {
-        moveText += whiteSan;
+    for (let i = 0; i < moveHistoryArr.length; i++) {
+        const row = moveHistoryArr[i];
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${i+1}</td><td>${row.white || ''}</td><td>${row.black || ''}</td>`;
+        tbody.appendChild(tr);
+    }
+}
+
+function addMove(moveNumber, whiteSan, blackSan) {
+    // moveNumber is 1-based
+    // Ensure moveHistoryArr has enough rows
+    while (moveHistoryArr.length < moveNumber) {
+        moveHistoryArr.push({white: '', black: ''});
+    }
+    if (whiteSan && !moveHistoryArr[moveNumber-1].white) {
+        moveHistoryArr[moveNumber-1].white = whiteSan;
     }
     if (blackSan) {
-        moveText += ` ${blackSan}`;
+        moveHistoryArr[moveNumber-1].black = blackSan;
     }
-    
-    moveItem.innerHTML = moveText;
-    movesHistory.appendChild(moveItem);
-    movesHistory.scrollTop = movesHistory.scrollHeight;
+    renderMoveHistory();
 }
+
+async function fetchModelStatus() {
+    try {
+        const res = await fetch('/api/model_status');
+        const data = await res.json();
+        const statusDiv = document.getElementById('model-status');
+        let html = '';
+        for (const [model, info] of Object.entries(data)) {
+            html += `<div><strong>${model}</strong>: ${info.loaded ? '🟢 Loaded' : '⚪ Unloaded'} | Memory: ${info.memory_mb || '?'} MB</div>`;
+        }
+        if (!html) html = '<div>No model status available</div>';
+        statusDiv.innerHTML = html;
+    } catch (e) {
+        document.getElementById('model-status').innerHTML = '<span style="color:#f66">Error loading model status</span>';
+    }
+}
+
+setInterval(fetchModelStatus, 3000);
 
 // Socket event handlers
 socket.on('thinking_stream', function(data) {

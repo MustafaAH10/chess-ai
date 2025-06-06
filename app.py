@@ -9,6 +9,7 @@ import time
 from datetime import datetime
 import re
 import os
+import psutil
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'chess-game-secret'
@@ -342,6 +343,43 @@ class OllamaManager:
             
             f.write("\n")
 
+    def extract_move(self, response, legal_moves, board=None):
+        """Extract a valid move from the model response, preferring UCI, fallback to SAN if needed."""
+        print(f"[extract_move] Extracting move from response: {response}")
+        # Try to find a UCI move in the legal moves list
+        for move in legal_moves:
+            if move in response:
+                print(f"[extract_move] Found valid UCI move in response: {move}")
+                return move
+        # Try to find a SAN move and convert to UCI if board is provided
+        if board:
+            for move in legal_moves:
+                try:
+                    san = board.san(chess.Move.from_uci(move))
+                    if san in response:
+                        print(f"[extract_move] Found SAN move in response: {san}, converting to UCI: {move}")
+                        return move
+                except Exception:
+                    continue
+        print(f"[extract_move] No valid move found in response")
+        return None
+
+    def get_model_status(self):
+        """Return a dict of model status: loaded/unloaded, memory usage."""
+        # This is a placeholder; you should integrate with your model manager if possible
+        status = {}
+        # Example: self.current_model, self.model_lock, etc.
+        if self.current_model:
+            # Get memory info
+            process = psutil.Process()
+            mem_info = process.memory_info()
+            status[self.current_model] = {
+                'loaded': True,
+                'memory_mb': mem_info.rss // (1024 * 1024)
+            }
+        # Add unloaded models if needed
+        return status
+
     def get_move(self, model_name, fen, game_history="", move_number=None, color=None):
         """Get move from model."""
         print(f"[get_move] Called for model: {model_name}, FEN: {fen}")
@@ -384,17 +422,17 @@ FEN Notation Guide:
         # Prompt improvements
         move_info = f"Move number: {move_number if move_number is not None else '?'}\nPlaying as: {color if color else '?'}\n"
         board_image_note = "The board image uses piece letters (uppercase for white, lowercase for black) and each square is labeled with its algebraic notation in the bottom left."
-        forceful = f"\n\nIMPORTANT: ONLY respond with one of the following moves: {', '.join(legal_moves)}. Do NOT invent moves. If you cannot, respond with ERROR."
+        forceful = f"\n\nIMPORTANT: ONLY output ONE move from the LEGAL MOVES LIST below, in UCI format (e.g., e2e4, g1f3). Do NOT use SAN (e.g., Nf3). Do NOT invent moves. If you output an illegal move, your move will be rejected.\nLEGAL MOVES (UCI): {', '.join(legal_moves)}"
         
         # Add piece legend for multimodal models
         multimodal_legend = f"\n\n{piece_legend}" if config.get("supports_multimodal", False) else ""
         
-        base_prompt = f"""You are a chess grandmaster. Analyze this position and make the best move.\n\n{move_info}\nCurrent position (FEN): {fen}\n{fen_explanation}\n\nBoard visualization:\n{board_vis}\n\n{board_image_note}{multimodal_legend}\n\nGame history: {game_history}\nLegal moves: {', '.join(legal_moves)}{forceful}\n\nIMPORTANT INSTRUCTIONS:\n1. You MUST choose a move from the legal moves list provided above\n2. Your response must be in this exact format:\n<thinking>\n[Your analysis and reasoning here]\n</thinking>\n\nMOVE: [move in UCI notation]\n\nFor example:\n<thinking>\nI will develop my knight to control the center.\n</thinking>\n\nMOVE: e2e4\n\nIf you cannot find a valid move, respond with:\nERROR: [explanation]"""
+        base_prompt = f"""You are a chess grandmaster. Analyze this position and make the best move.\n\n{move_info}\nCurrent position (FEN): {fen}\n{fen_explanation}\n\nBoard visualization:\n{board_vis}\n\n{board_image_note}{multimodal_legend}\n\nGame history: {game_history}{forceful}\n\nFormat your response as follows:\n<thinking>\n[Your reasoning here]\n</thinking>\n\nMOVE: [your move in UCI notation]\n\nFor example:\n<thinking>\nI will develop my knight to control the center.\n</thinking>\n\nMOVE: e2e4\n\nIf you cannot find a valid move, respond with:\nERROR: [explanation]"""
 
         if config["supports_cot"]:
-            prompt = base_prompt + """\n<thinking>\nThink step by step:\n1. Analyze the current position:\n   - Which pieces are where?\n   - Who's turn is it?\n   - What are the key tactical and strategic elements?\n2. Review the legal moves provided\n3. Evaluate each promising candidate move:\n   - Does it develop pieces?\n   - Does it control the center?\n   - Does it create threats?\n   - Does it maintain king safety?\n4. Choose the best move based on your analysis\n5. Explain your reasoning\n</thinking>\n\nAfter your analysis, provide your move in UCI notation (e.g., e2e4, g1f3).\nFormat your final answer as: MOVE: [your move in UCI notation]"""
+            prompt = base_prompt
         else:
-            prompt = base_prompt + """\nYour task:\n1. Analyze the position\n2. Choose the best move from the legal moves list\n3. Provide your move in UCI notation (e.g., e2e4, g1f3)\n\nFormat: MOVE: [your move in UCI notation]"""
+            prompt = base_prompt
 
         try:
             print(f"[get_move] Sending request to Ollama API for model {model_name}")
@@ -467,7 +505,7 @@ FEN Notation Guide:
                             print(f"[get_move] JSON decode error: {e} for line: {line}")
                             continue
                 print(f"[get_move] Full thinking: {full_thinking}")
-                move = self.extract_move(full_thinking)
+                move = self.extract_move(full_thinking, legal_moves, board)
                 print(f"[get_move] Extracted move: {move}")
                 
                 # Log the move
@@ -528,28 +566,6 @@ FEN Notation Guide:
         board_vis += "  " + " ".join(files)
         
         return board_vis
-    
-    def extract_move(self, response):
-        """Extract move from model response."""
-        print(f"[extract_move] Extracting move from response: {response}")
-        
-        # First try to find MOVE: pattern
-        move_match = re.search(r'MOVE:\s*([a-h][1-8][a-h][1-8](?:[qrbn])?)', response.lower())
-        if move_match:
-            move = move_match.group(1)
-            print(f"[extract_move] Found move using MOVE: pattern: {move}")
-            return move
-        
-        # If no MOVE: pattern, try to find any UCI move in the response
-        uci_pattern = r'[a-h][1-8][a-h][1-8](?:[qrbn])?'
-        move_match = re.search(uci_pattern, response.lower())
-        if move_match:
-            move = move_match.group(0)
-            print(f"[extract_move] Found move using UCI pattern: {move}")
-            return move
-        
-        print(f"[extract_move] No move found in response")
-        return None
 
 # Global instances
 ollama_manager = OllamaManager()
@@ -611,10 +627,17 @@ def play_game(white_model, black_model):
         print(f"Model {current_model} returned move: {move}, thinking: {thinking}")
         
         if move:
-            # Validate move and get SAN
-            is_valid, san, reason = ollama_manager.validate_move(move, current_game.board)
+            # Validate move using ChessGame's validate_move method
+            is_valid, reason = current_game.validate_move(move)
             
             if is_valid:
+                # Get SAN before making the move
+                try:
+                    san = current_game.board.san(chess.Move.from_uci(move))
+                except Exception as e:
+                    print(f"Error getting SAN for move {move}: {e}")
+                    san = move
+                
                 # Make the move
                 success, reason = current_game.make_move(move)
                 print(f"Tried to make move {move}: success={success}, reason={reason}")
@@ -660,6 +683,10 @@ def play_game(white_model, black_model):
     print("Game over. Unloading models.")
     # Unload both models when game is over
     ollama_manager.unload_current_model()
+
+@app.route('/api/model_status')
+def api_model_status():
+    return jsonify(ollama_manager.get_model_status())
 
 if __name__ == '__main__':
     print("Starting Chess Game Server...")
