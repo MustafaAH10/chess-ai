@@ -1,0 +1,482 @@
+/* Chess AI Application Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #1e3c72, #2a5298);
+    color: #333;
+    min-height: 100vh;
+    padding: 15px;
+}
+
+.container {
+    max-width: 1800px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 500px 1fr;
+    grid-template-rows: auto 1fr;
+    gap: 20px;
+    height: calc(100vh - 30px);
+}
+
+.header {
+    grid-column: 1 / -1;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    text-align: center;
+}
+
+.header h1 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+    font-size: 2.2em;
+}
+
+.model-selection {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.model-card {
+    background: #3498db;
+    color: white;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 25px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 0.9em;
+    font-weight: 600;
+}
+
+.model-card:hover {
+    background: #2980b9;
+    transform: translateY(-2px);
+}
+
+.model-card.selected {
+    background: #e74c3c;
+    box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);
+}
+
+.controls {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.btn {
+    padding: 10px 18px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.95em;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.btn-primary {
+    background: #27ae60;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #229954;
+    transform: translateY(-1px);
+}
+
+.btn-secondary {
+    background: #95a5a6;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: #7f8c8d;
+}
+
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.chess-section {
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.game-info {
+    text-align: center;
+    margin-bottom: 15px;
+    width: 100%;
+}
+
+.status {
+    font-size: 1.2em;
+    font-weight: bold;
+    margin-bottom: 8px;
+    color: #2c3e50;
+}
+
+.move-history {
+    max-height: 60px;
+    overflow-y: auto;
+    background: #ecf0f1;
+    padding: 8px;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 0.85em;
+    width: 100%;
+}
+
+.chess-board {
+    display: grid;
+    grid-template-columns: repeat(8, 45px);
+    grid-template-rows: repeat(8, 45px);
+    border: 3px solid #2c3e50;
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 15px 0;
+}
+
+.chess-square {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8em;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.chess-square.light {
+    background: #f0d9b5;
+}
+
+.chess-square.dark {
+    background: #b58863;
+}
+
+.chess-square:hover {
+    background: #ffeb3b !important;
+}
+
+.chess-square.selected {
+    background: #4caf50 !important;
+}
+
+/* Analysis Panel Styles */
+.analysis-panel {
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.analysis-panel h3 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+    text-align: center;
+    font-size: 1.3em;
+    font-weight: 600;
+}
+
+.common-prompt-section {
+    background: #e8f5e8;
+    border: 2px solid #27ae60;
+    border-radius: 10px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.common-prompt-title {
+    color: #27ae60;
+    font-weight: bold;
+    font-size: 1em;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.common-prompt-text {
+    background: white;
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 0.85em;
+    max-height: 150px;
+    overflow-y: auto;
+    font-family: 'Consolas', 'Monaco', monospace;
+    line-height: 1.4;
+    border: 1px solid #27ae60;
+}
+
+.stockfish-section {
+    background: #fff3e0;
+    border: 2px solid #ff9800;
+    border-radius: 10px;
+    padding: 15px;
+    margin-bottom: 15px;
+}
+
+.stockfish-title {
+    color: #e65100;
+    font-weight: bold;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.stockfish-content {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    font-size: 0.9em;
+}
+
+.stockfish-item {
+    background: white;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #ffcc02;
+}
+
+.stockfish-label {
+    font-weight: bold;
+    color: #e65100;
+    font-size: 0.8em;
+}
+
+.models-container {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.individual-model-box {
+    background: #f8f9fa;
+    border: 2px solid #3498db;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+}
+
+.model-box-header {
+    background: #3498db;
+    color: white;
+    padding: 12px 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.model-name {
+    font-weight: bold;
+    font-size: 1em;
+}
+
+.model-status {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+}
+
+.model-box-content {
+    padding: 15px;
+}
+
+.move-suggestion {
+    background: #27ae60;
+    color: white;
+    padding: 8px 15px;
+    border-radius: 20px;
+    display: inline-block;
+    margin-bottom: 10px;
+    font-weight: bold;
+    font-size: 0.95em;
+}
+
+.move-suggestion.no-move {
+    background: #e74c3c;
+}
+
+.confidence-section {
+    margin: 10px 0;
+}
+
+.confidence-label {
+    font-size: 0.85em;
+    color: #7f8c8d;
+    margin-bottom: 4px;
+}
+
+.reasoning-text {
+    background: #f8f9fa;
+    border-radius: 6px;
+    padding: 12px;
+    margin-top: 8px;
+    font-size: 0.85em;
+    line-height: 1.4;
+    color: #34495e;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.thinking-time {
+    font-size: 0.75em;
+    color: #7f8c8d;
+    margin-top: 8px;
+    text-align: right;
+}
+
+.confidence-bar {
+    background: #ecf0f1;
+    border-radius: 10px;
+    height: 8px;
+    overflow: hidden;
+    margin-top: 4px;
+}
+
+.confidence-fill {
+    background: linear-gradient(to right, #e74c3c, #f39c12, #27ae60);
+    height: 100%;
+    border-radius: 10px;
+    transition: width 0.3s ease;
+}
+
+.consensus-section {
+    background: #e74c3c;
+    color: white;
+    padding: 15px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.consensus-move {
+    font-size: 1.2em;
+    font-weight: bold;
+    margin-bottom: 8px;
+}
+
+.consensus-strength {
+    font-size: 0.9em;
+    margin-bottom: 12px;
+}
+
+.debate-section {
+    background: #fff4e6;
+    border: 2px solid #ff9800;
+    border-radius: 10px;
+    padding: 15px;
+    margin-bottom: 15px;
+}
+
+.debate-title {
+    color: #e65100;
+    font-weight: bold;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.conflict-indicator {
+    background: #ff5722;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 0.75em;
+}
+
+.debate-rounds {
+    background: white;
+    border-radius: 6px;
+    padding: 12px;
+    margin-top: 10px;
+}
+
+.loading {
+    text-align: center;
+    padding: 20px;
+    color: #7f8c8d;
+}
+
+.spinner {
+    border: 3px solid #ecf0f1;
+    border-top: 3px solid #3498db;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 8px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@media (max-width: 1400px) {
+    .container {
+        grid-template-columns: 450px 1fr;
+    }
+}
+
+@media (max-width: 1000px) {
+    .container {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto 1fr;
+    }
+    
+    .chess-section {
+        order: 2;
+    }
+
+    .analysis-panel {
+        order: 3;
+    }
+}
+
+@media (max-width: 768px) {
+    .chess-board {
+        grid-template-columns: repeat(8, 35px);
+        grid-template-rows: repeat(8, 35px);
+    }
+    
+    .chess-square {
+        font-size: 1.4em;
+    }
+    
+    .header h1 {
+        font-size: 1.8em;
+    }
+
+    .stockfish-content {
+        grid-template-columns: 1fr;
+    }
+
+    .common-prompt-text {
+        max-height: 100px;
+    }
+}
